@@ -14,7 +14,7 @@ const { fillArray } = require("./utils");
  * @returns
  */
 function isOnOffSequencesOk(
-  onOff, 
+  onOff,
   maxMinutesOff,
   minMinutesOff,
   recoveryPercentage,
@@ -95,57 +95,85 @@ function calculate(
   lastCountDayBefore = 0
 ) {
   const dayBefore = fillArray(lastValueDayBefore, lastCountDayBefore);
-  const last = values.length - 1;
+  const n = values.length;
+  const last = n - 1;
 
-  // Create matrix with saving per minute
-  const savingPerMinute = [];
-  for (let minutes = 0; minutes < last; minutes++) {
-    const row = [];
-    for (let count = 1; count <= maxMinutesOff; count++) {
-      const on = minutes + count;
-      const saving = values[minutes] - values[on >= last ? last : on];
-      row.push(saving);
-    }
-    savingPerMinute.push(row);
+  // Edge case: no values or maxMinutesOff is 0
+  if (n === 0 || maxMinutesOff === 0) {
+    return values.map(() => true);
   }
 
-  // Create list with summary saving per sequence
-  let savingsList = [];
+  // Limit maxMinutesOff to what's meaningful for the data
+  const effectiveMaxOff = Math.min(maxMinutesOff, last);
+
+  // Build list of candidate off-sequences with their savings
+  // A sequence starting at minute m with count c turns off slots [m, m+count)
+  // and turns on at slot m+count (or stays off if at end)
+  const candidates = [];
+
   for (let minute = 0; minute < last; minute++) {
-    for (let count = 1; count <= maxMinutesOff; count++) {
+    // Only consider counts from minMinutesOff to effectiveMaxOff
+    for (let count = minMinutesOff; count <= effectiveMaxOff; count++) {
+      // Sequence would occupy [minute, minute+count)
+      // Cannot extend beyond last (need at least one slot after for "on")
+      if (minute + count > last) break;
+
+      // Calculate total saving for this sequence
+      // Saving = sum of (price[i] - price[turnOnSlot]) for each slot i in [minute, minute+count)
+      const turnOnSlot = minute + count;
+      const turnOnPrice = values[turnOnSlot];
       let saving = 0;
-      for (let offset = 0; offset < count && minute + offset < last; offset++) {
-        saving += savingPerMinute[minute + offset][count - offset - 1];
+
+      for (let i = minute; i < minute + count; i++) {
+        saving += values[i] - turnOnPrice;
       }
-      if (saving > minSaving * count && minute + count <= last && values[minute] > values[minute + count] + minSaving) {
-        savingsList.push({ minute, count, saving });
+
+      // Check minimum saving criteria
+      if (saving > minSaving * count && values[minute] > turnOnPrice + minSaving) {
+        candidates.push({ minute, count, saving });
       }
     }
   }
 
-  savingsList.sort((a, b) => b.saving === a.saving ? a.count - b.count : b.saving - a.saving);
-  let onOff = values.map((v) => true); // Start with all on
+  // Sort by saving descending, then by count ascending (prefer shorter sequences if equal saving)
+  candidates.sort((a, b) => b.saving === a.saving ? a.count - b.count : b.saving - a.saving);
 
-  // Find the best possible sequences
-  while (savingsList.length > 0) {
-    const { minute, count } = savingsList[0];
-    const onOffCopy = [...onOff];
-    let alreadyTaken = false;
-    for (let c = 0; c < count; c++) {
-      if (!onOff[minute + c]) {
-        alreadyTaken = true;
+  // Track which slots are taken
+  const taken = new Array(n).fill(false);
+
+  // Greedy selection
+  for (const candidate of candidates) {
+    const { minute, count } = candidate;
+
+    // Check if any slot in this range is already taken
+    let canUse = true;
+    for (let i = minute; i < minute + count; i++) {
+      if (taken[i]) {
+        canUse = false;
+        break;
       }
-      onOff[minute + c] = false;
     }
-    if (isOnOffSequencesOk([...dayBefore, ...onOff], maxMinutesOff, minMinutesOff, recoveryPercentage,
-      recoveryMaxMinutes) && !alreadyTaken) {
-      savingsList = savingsList.filter((s) => s.minute < minute || s.minute >= minute + count);
-    } else {
-      onOff = [...onOffCopy];
-      savingsList.splice(0, 1);
+
+    if (!canUse) continue;
+
+    // Check if adding this sequence would violate constraints
+    // We use the original validation function for correctness, but only when we're actually
+    // considering adding a new sequence (not for every iteration through the list)
+    const testOnOff = taken.map(t => !t); // Convert taken to onOff (taken=off, !taken=on)
+    for (let i = minute; i < minute + count; i++) {
+      testOnOff[i] = false;
+    }
+
+    if (isOnOffSequencesOk([...dayBefore, ...testOnOff], maxMinutesOff, minMinutesOff, recoveryPercentage, recoveryMaxMinutes)) {
+      // Accept this sequence
+      for (let i = minute; i < minute + count; i++) {
+        taken[i] = true;
+      }
     }
   }
-  return onOff;
+
+  // Convert taken array to onOff result
+  return taken.map(t => !t);
 }
 
 module.exports = { calculate, isOnOffSequencesOk };
