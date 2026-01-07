@@ -10,10 +10,10 @@ module.exports = function (RED) {
 
     const validConfig = {
       contextStorage: config.contextStorage || "default",
-      maxMinutesOff: config.maxMinutesOff,
-      minMinutesOff: config.minMinutesOff,
-      recoveryPercentage: config.recoveryPercentage,
-      recoveryMaxMinutes: config.recoveryMaxMinutes,
+      maxMinutesOff: parseInt(config.maxMinutesOff, 10),
+      minMinutesOff: parseInt(config.minMinutesOff, 10),
+      recoveryPercentage: parseInt(config.recoveryPercentage, 10),
+      recoveryMaxMinutes: config.recoveryMaxMinutes === "" ? null : parseInt(config.recoveryMaxMinutes, 10),
       minSaving: parseFloat(config.minSaving),
       outputIfNoSchedule: booleanConfig(config.outputIfNoSchedule),
       outputValueForOn: config.outputValueForOn || true,
